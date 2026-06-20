@@ -1,0 +1,72 @@
+name: aria-remediation
+
+# Triggered by Aria's Agent 4 (via the run_sandbox_ci Lyzr tool -> workflow_dispatch API).
+# It applies the proposed fix on a new branch, runs the sandbox tests, and — only if they pass —
+# opens a PR. Opening the PR also triggers ci.yml, so the PR shows its own green checks.
+# Deploy (merging this PR) stays a human action — this workflow never merges.
+
+on:
+  workflow_dispatch:
+    inputs:
+      file_path:
+        description: "Repo file to edit"
+        required: true
+        default: "config/hyperion/relay-routing.yaml"
+      find:
+        description: "Exact text to find"
+        required: true
+      replace:
+        description: "Replacement text"
+        required: true
+      incident_key:
+        description: "Incident reference"
+        required: false
+        default: "incident"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  remediate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install pyyaml pytest
+
+      - name: Create fix branch
+        run: |
+          git config user.name "aria-remediation-bot"
+          git config user.email "actions@users.noreply.github.com"
+          echo "BRANCH=aria-fix-${{ github.run_id }}" >> "$GITHUB_ENV"
+          git checkout -b "aria-fix-${{ github.run_id }}"
+
+      - name: Apply fix
+        env:
+          FILE_PATH: ${{ inputs.file_path }}
+          FIND: ${{ inputs.find }}
+          REPLACE: ${{ inputs.replace }}
+        run: |
+          python -c "import os; p=os.environ['FILE_PATH']; t=open(p,encoding='utf-8').read(); f=os.environ['FIND']; r=os.environ['REPLACE']; n=t.replace(f,r,1) if (f and f in t) else t; open(p,'w',encoding='utf-8').write(n); print('applied' if n!=t else 'no-change')"
+
+      - name: Run sandbox tests
+        run: pytest -q tests/
+
+      - name: Commit & push branch
+        run: |
+          git add -A
+          git commit -m "fix: remediation for ${{ inputs.incident_key }}" || echo "nothing to commit"
+          git push origin "$BRANCH"
+
+      - name: Open PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create --base main --head "$BRANCH" \
+            --title "[Aria] Remediation — ${{ inputs.incident_key }}" \
+            --body "Automated remediation proposed by Aria Agent 4 (sandbox-tested). Incident: ${{ inputs.incident_key }}. Deploy = merge after the human gate."
