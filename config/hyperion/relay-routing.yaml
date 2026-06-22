@@ -1,6 +1,6 @@
 # Hyperion issuer-relay routing — DEMO / mock config (stand-in for Thredd).
 # This is the file the Remediation Agent edits during a fix (active_relay_path).
-active_relay_path: secondary
+active_relay_path: primary
 
 paths:
   primary:
